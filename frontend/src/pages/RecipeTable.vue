@@ -4,12 +4,26 @@ import { ElMessage } from 'element-plus'
 import DilutionInput from '../components/common/DilutionInput.vue'
 import PushPullTag from '../components/common/PushPullTag.vue'
 import TimeTempCurve from '../components/common/TimeTempCurve.vue'
-import { calculateCompensatedMinutes, useTempCompensate } from '../hooks/useTempCompensate'
+import {
+  calculateCompensatedMinutes,
+  coefficientsForDeveloper,
+  getCompensationAdvice,
+  useTempCompensate,
+  type CompensationCoefficients
+} from '../hooks/useTempCompensate'
 import { useRecipeFilter } from '../hooks/useRecipeFilter'
 import { useDeveloperStore } from '../stores/developerStore'
 import { useFilmStore } from '../stores/filmStore'
 import { useRecipeStore } from '../stores/recipeStore'
-import type { Developer, Dilution } from '../types/developer'
+import {
+  DEFAULT_COOL_FACTOR,
+  DEFAULT_WARM_FACTOR,
+  isValidFactor,
+  resolveCoolFactor,
+  resolveWarmFactor,
+  type Developer,
+  type Dilution
+} from '../types/developer'
 import type { DevRecipe, PushPull } from '../types/dev-recipe'
 
 interface RecipeForm {
@@ -34,7 +48,10 @@ const showForm = ref(false)
 const saving = ref(false)
 const sampleWorkingVolume = ref(300)
 const referenceTemp = computed(() => filteredRecipes.value[0]?.tempC ?? 20)
-const { actualTempC, suggest } = useTempCompensate(referenceTemp)
+const referenceCoefficients = computed<CompensationCoefficients | undefined>(() =>
+  coefficientsForDeveloper(filteredRecipes.value[0]?.developerId, developerStore.developers)
+)
+const { actualTempC } = useTempCompensate(referenceTemp, referenceCoefficients)
 
 watch(referenceTemp, (value) => {
   actualTempC.value = value
@@ -54,14 +71,19 @@ const form = reactive<RecipeForm>({
   note: ''
 })
 
+function coefficientsOf(recipe: DevRecipe): CompensationCoefficients | undefined {
+  return coefficientsForDeveloper(recipe.developerId, developerStore.developers)
+}
+
 const curvePoints = computed(() => {
   const recipe = filteredRecipes.value[0]
   if (!recipe) return []
+  const coefficients = coefficientsOf(recipe)
   return Array.from({ length: 13 }, (_, index) => {
     const temp = Math.round((recipe.tempC - 3 + index * 0.5) * 10) / 10
     return {
       tempC: temp,
-      minutes: calculateCompensatedMinutes(recipe.devMinutes, temp, recipe.tempC)
+      minutes: calculateCompensatedMinutes(recipe.devMinutes, temp, recipe.tempC, coefficients)
     }
   })
 })
@@ -76,8 +98,22 @@ function developerLabel(id: number): string {
   return developer ? `${developer.name} · ${developer.category}` : '未知显影液'
 }
 
-function suggestedFor(recipe: { devMinutes: number; tempC: number }): number {
-  return suggest(recipe.devMinutes, actualTempC.value).minutes
+/** 配方表折算：以配方自身基准温度和其工作液系数计算，与冲洗记录同一入口 */
+function suggestedFor(recipe: DevRecipe): number {
+  return getCompensationAdvice(
+    recipe.devMinutes,
+    actualTempC.value,
+    recipe.tempC,
+    coefficientsOf(recipe)
+  ).minutes
+}
+
+function factorHint(recipe: DevRecipe): string {
+  const developer = developerStore.developers.find((item) => item.id === recipe.developerId)
+  const warm = resolveWarmFactor(developer)
+  const cool = resolveCoolFactor(developer)
+  const custom = isValidFactor(developer?.warmFactor) || isValidFactor(developer?.coolFactor)
+  return `升温 ×${warm} / 降温 ×${cool}${custom ? '' : '（通用）'}`
 }
 
 function pickCurveTemp(temp: number): void {
@@ -291,7 +327,7 @@ onMounted(async () => {
                 <td>{{ recipe.tempC }}°C / {{ recipe.devMinutes.toFixed(2) }} 分钟</td>
                 <td>
                   <strong class="accent-number">{{ suggestedFor(recipe).toFixed(2) }} 分钟</strong>
-                  <small>{{ actualTempC }}°C 实测温度</small>
+                  <small>{{ actualTempC }}°C 查看温度 · {{ factorHint(recipe) }}</small>
                 </td>
                 <td><PushPullTag :value="recipe.pushPull" show-hint /></td>
                 <td>
@@ -315,8 +351,23 @@ onMounted(async () => {
         />
         <div class="panel formula-note">
           <h2>补偿模型</h2>
-          <p>以配方自身温度为基准，每升高 1°C 将显影时间乘 0.9；每降低 1°C 则乘 1.1。</p>
-          <strong>{{ actualTempC }}°C · 建议 {{ suggest(filteredRecipes[0]?.devMinutes ?? 0, actualTempC).minutes.toFixed(2) }} 分钟</strong>
+          <p>
+            每条配方按其工作液登记的系数折算：温度每升高 1°C 乘升温系数，每降低 1°C 乘降温系数；
+            未登记的工作液沿用通用值 ×{{ DEFAULT_WARM_FACTOR }} / ×{{ DEFAULT_COOL_FACTOR }}。
+          </p>
+          <p v-if="filteredRecipes[0]">
+            当前曲线：{{ developerLabel(filteredRecipes[0].developerId) }}，{{ factorHint(filteredRecipes[0]) }}
+          </p>
+          <p v-else>当前筛选下没有配方。</p>
+          <strong v-if="filteredRecipes[0]">
+            {{ actualTempC }}°C · 建议
+            {{ getCompensationAdvice(
+              filteredRecipes[0].devMinutes,
+              actualTempC,
+              filteredRecipes[0].tempC,
+              coefficientsOf(filteredRecipes[0])
+            ).minutes.toFixed(2) }} 分钟
+          </strong>
         </div>
       </aside>
     </div>

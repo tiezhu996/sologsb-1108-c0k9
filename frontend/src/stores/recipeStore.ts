@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { db, plain } from '../utils/db'
-import { calculateCompensatedMinutes } from '../hooks/useTempCompensate'
-import type { DevRecipe } from '../types/dev-recipe'
+import {
+  calculateCompensatedMinutes,
+  coefficientsForDeveloper
+} from '../hooks/useTempCompensate'
+import { useDeveloperStore } from './developerStore'
+import type { DevRecipe, PushPull } from '../types/dev-recipe'
 import type { Dilution } from '../types/developer'
-import type { PushPull } from '../types/dev-recipe'
 
 type NewRecipe = Omit<DevRecipe, 'id' | 'schemaRev'>
 
@@ -24,9 +27,15 @@ export const useRecipeStore = defineStore('recipe', {
       return matchesFilm && matchesDilution && matchesPushPull
     }),
     compensatedRecipes(): Array<DevRecipe & { compensatedMinutes: number }> {
+      const developerStore = useDeveloperStore()
       return this.filteredRecipes.map((recipe) => ({
         ...recipe,
-        compensatedMinutes: calculateCompensatedMinutes(recipe.devMinutes, this.targetTempC, recipe.tempC)
+        compensatedMinutes: calculateCompensatedMinutes(
+          recipe.devMinutes,
+          this.targetTempC,
+          recipe.tempC,
+          coefficientsForDeveloper(recipe.developerId, developerStore.developers)
+        )
       }))
     }
   },
@@ -40,7 +49,7 @@ export const useRecipeStore = defineStore('recipe', {
       }
     },
     async addRecipe(payload: NewRecipe): Promise<number> {
-      const next = { ...payload, schemaRev: 2 }
+      const next = { ...payload, schemaRev: 3 }
       const id = await db.recipes.add(plain(next))
       await this.load()
       return id

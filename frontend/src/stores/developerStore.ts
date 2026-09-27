@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { db, plain } from '../utils/db'
-import type { Developer } from '../types/developer'
+import { isValidFactor, type Developer } from '../types/developer'
 import { remainingRolls } from '../utils/ratio'
 
 type NewDeveloper = Omit<Developer, 'id' | 'schemaRev'>
@@ -17,7 +17,9 @@ export const useDeveloperStore = defineStore('developer', {
         (sum, developer) => sum + remainingRolls(developer.maxRolls, developer.usedRolls),
         0
       )
-    }
+    },
+    developerById: (state) => (id?: number): Developer | undefined =>
+      id === undefined ? undefined : state.developers.find((developer) => developer.id === id)
   },
   actions: {
     async load(): Promise<void> {
@@ -29,7 +31,14 @@ export const useDeveloperStore = defineStore('developer', {
       }
     },
     async addDeveloper(payload: NewDeveloper): Promise<number> {
-      const next = { ...payload, schemaRev: 2 }
+      // 系数只接受正数；填了零、负数或非数字直接拦下，不写入
+      if (payload.warmFactor !== undefined && !isValidFactor(payload.warmFactor)) {
+        throw new Error('升温系数必须是大于 0 的数字')
+      }
+      if (payload.coolFactor !== undefined && !isValidFactor(payload.coolFactor)) {
+        throw new Error('降温系数必须是大于 0 的数字')
+      }
+      const next = { ...payload, schemaRev: 3 }
       const id = await db.developers.add(plain(next))
       await this.load()
       return id

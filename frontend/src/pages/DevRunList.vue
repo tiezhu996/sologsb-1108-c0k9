@@ -5,7 +5,7 @@ import { useRoute } from 'vue-router'
 import EmptyPanel from '../components/common/EmptyPanel.vue'
 import FilterBar from '../components/common/FilterBar.vue'
 import PushPullTag from '../components/common/PushPullTag.vue'
-import { useTempCompensate } from '../hooks/useTempCompensate'
+import { useTempCompensate, coefficientsForDeveloper, type CompensationCoefficients } from '../hooks/useTempCompensate'
 import { useDeveloperStore } from '../stores/developerStore'
 import { useFilmStore } from '../stores/filmStore'
 import { useRecipeStore } from '../stores/recipeStore'
@@ -61,10 +61,16 @@ const form = reactive<RunForm>({
 
 const selectedRecipe = computed(() => recipeStore.recipes.find((recipe) => recipe.id === form.recipeId))
 const referenceTemp = computed(() => selectedRecipe.value?.tempC ?? 20)
-const { suggest } = useTempCompensate(referenceTemp)
+const referenceCoefficients = computed<CompensationCoefficients | undefined>(() =>
+  selectedRecipe.value
+    ? coefficientsForDeveloper(selectedRecipe.value.developerId, developerStore.developers)
+    : undefined
+)
+const { suggest } = useTempCompensate(referenceTemp, referenceCoefficients)
 const suggestion = computed(() => {
   const recipe = selectedRecipe.value
   if (!recipe) return null
+  // 与配方表同一入口：配方基准温度 + 该配方工作液的升 / 降温系数
   return suggest(recipe.devMinutes, form.actualTempC)
 })
 
@@ -216,6 +222,9 @@ onMounted(async () => {
           <div>
             <strong>温度补偿建议</strong>
             <p v-if="suggestion">{{ suggestion.advice }}；显影液用量会在保存后加一卷。</p>
+            <p v-if="selectedRecipe">
+              按「{{ recipeLabel(selectedRecipe.id ?? 0) }}」所用工作液系数折算，与配方表口径一致。
+            </p>
             <p v-else>请选择一条配方后查看修正建议。</p>
           </div>
           <button type="button" class="ghost-button" :disabled="!suggestion" @click="applySuggestion">采用修正时间</button>

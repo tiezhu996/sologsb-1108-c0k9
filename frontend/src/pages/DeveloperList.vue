@@ -4,7 +4,15 @@ import { ElMessage } from 'element-plus'
 import DilutionInput from '../components/common/DilutionInput.vue'
 import StatBadge from '../components/common/StatBadge.vue'
 import { useDeveloperStore } from '../stores/developerStore'
-import type { Developer, DeveloperCategory, DeveloperState, Dilution } from '../types/developer'
+import {
+  DEFAULT_COOL_FACTOR,
+  DEFAULT_WARM_FACTOR,
+  isValidFactor,
+  type Developer,
+  type DeveloperCategory,
+  type DeveloperState,
+  type Dilution
+} from '../types/developer'
 import { calculateStockVolume, remainingRolls } from '../utils/ratio'
 
 interface DeveloperForm {
@@ -16,6 +24,8 @@ interface DeveloperForm {
   maxRolls: number
   usedRolls: number
   state: DeveloperState
+  warmFactor: number | string | null
+  coolFactor: number | string | null
 }
 
 const developerStore = useDeveloperStore()
@@ -29,7 +39,9 @@ const form = reactive<DeveloperForm>({
   mixedAt: new Date().toISOString().slice(0, 10),
   maxRolls: 12,
   usedRolls: 0,
-  state: '新配'
+  state: '新配',
+  warmFactor: null,
+  coolFactor: null
 })
 
 function stateTone(developer: Developer): 'cyan' | 'amber' | 'rose' {
@@ -38,9 +50,33 @@ function stateTone(developer: Developer): 'cyan' | 'amber' | 'rose' {
   return 'amber'
 }
 
+/** 读表单里的系数：留空（null 或空串）视为未登记；非数字、零、负数判为非法 */
+function readFactor(raw: number | string | null | undefined): { value?: number; invalid: boolean } {
+  if (raw === null || raw === undefined || raw === '') return { invalid: false }
+  const num = Number(raw)
+  if (!Number.isFinite(num) || num <= 0) return { invalid: true }
+  return { value: num, invalid: false }
+}
+
+function factorLabel(developer: Developer, key: 'warmFactor' | 'coolFactor'): string {
+  const value = developer[key]
+  if (!isValidFactor(value)) return `通用 ${key === 'warmFactor' ? DEFAULT_WARM_FACTOR : DEFAULT_COOL_FACTOR}`
+  return value.toFixed(2)
+}
+
 async function submitDeveloper(): Promise<void> {
   if (!form.name.trim() || !form.mixedAt) {
     ElMessage.warning('请填写显影液名称与配制日期')
+    return
+  }
+  const warmFactor = readFactor(form.warmFactor)
+  const coolFactor = readFactor(form.coolFactor)
+  if (warmFactor.invalid) {
+    ElMessage.warning('升温系数必须是大于 0 的数字，留空则沿用通用值 0.9')
+    return
+  }
+  if (coolFactor.invalid) {
+    ElMessage.warning('降温系数必须是大于 0 的数字，留空则沿用通用值 1.1')
     return
   }
   saving.value = true
@@ -50,7 +86,9 @@ async function submitDeveloper(): Promise<void> {
       name: form.name.trim(),
       volumeMl: Math.max(0, form.volumeMl),
       maxRolls: Math.max(1, form.maxRolls),
-      usedRolls: Math.max(0, form.usedRolls)
+      usedRolls: Math.max(0, form.usedRolls),
+      warmFactor: warmFactor.value,
+      coolFactor: coolFactor.value
     })
     ElMessage.success('显影液工作液已登记')
     form.name = ''
@@ -58,7 +96,11 @@ async function submitDeveloper(): Promise<void> {
     form.maxRolls = 12
     form.usedRolls = 0
     form.state = '新配'
+    form.warmFactor = null
+    form.coolFactor = null
     showForm.value = false
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '工作液保存失败，请检查系数填写')
   } finally {
     saving.value = false
   }
@@ -143,6 +185,30 @@ onMounted(() => {
           <span>已冲卷数</span>
           <input v-model.number="form.usedRolls" data-testid="field-usedRolls" type="number" min="0" max="100" />
         </label>
+        <label>
+          <span>升温系数（每 +1°C）</span>
+          <input
+            v-model.number="form.warmFactor"
+            data-testid="field-warmFactor"
+            type="number"
+            min="0.01"
+            max="2"
+            step="0.01"
+            placeholder="留空沿用 0.9"
+          />
+        </label>
+        <label>
+          <span>降温系数（每 -1°C）</span>
+          <input
+            v-model.number="form.coolFactor"
+            data-testid="field-coolFactor"
+            type="number"
+            min="0.01"
+            max="2"
+            step="0.01"
+            placeholder="留空沿用 1.1"
+          />
+        </label>
       </div>
       <div class="form-actions">
         <button type="button" class="ghost-button" @click="showForm = false">取消</button>
@@ -184,6 +250,10 @@ onMounted(() => {
             <div><dt>工作液容量</dt><dd>{{ developer.volumeMl }} mL</dd></div>
             <div><dt>配制日期</dt><dd>{{ developer.mixedAt }}</dd></div>
             <div><dt>所需浓缩液</dt><dd>{{ calculateStockVolume(developer.volumeMl, developer.dilution) }} mL</dd></div>
+            <div>
+              <dt>温度补偿系数</dt>
+              <dd>升温 ×{{ factorLabel(developer, 'warmFactor') }} / 降温 ×{{ factorLabel(developer, 'coolFactor') }}</dd>
+            </div>
           </dl>
           <div class="life-meter">
             <div class="life-meter__head">
