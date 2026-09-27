@@ -73,7 +73,8 @@ npm run build
 
 - IndexedDB 数据库名：`gbfilmdev-db`
 - Dexie 版本：`version(1)` 创建 `films`、`developers`、`recipes`、`runs` 四张表并建立常用查询索引。
-- 迁移：`version(2).upgrade(...)` 为已有记录回填 `schemaRev: 2`。首次打开数据库时通过 `populate` 写入丰富的胶片、显影液、配方和实冲记录。
+- Dexie 版本：`version(1)` 创建 `films`、`developers`、`recipes`、`runs` 四张表并建立常用查询索引。
+- 迁移：`version(2).upgrade(...)` 为已有记录回填 `schemaRev: 2`；`version(3).upgrade(...)` 为老工作液补齐各自的温度补偿系数 `warmFactor` / `coolFactor`（升温 0.9、降温 1.1 通用值），并把全部记录推进到 `schemaRev: 3`。首次打开数据库时通过 `populate` 写入丰富的胶片、显影液、配方和实冲记录。
 - 数据保存在当前浏览器，不随容器重建而丢失；更换浏览器或清理站点数据前，可在顶部导航点击“导出数据”下载 JSON 备份。
 - 所有新增和更新动作在写入 Dexie 前均会去除响应式代理，避免 `DataCloneError`。
 

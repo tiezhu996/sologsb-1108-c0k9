@@ -12,5 +12,9 @@ export interface Developer {
   maxRolls: number
   usedRolls: number
   state: DeveloperState
+  /** 升温系数：实测温度每高于基准 1°C，显影时间乘以此值 */
+  warmFactor?: number
+  /** 降温系数：实测温度每低于基准 1°C，显影时间乘以此值 */
+  coolFactor?: number
   schemaRev?: number
 }
